@@ -1,0 +1,67 @@
+# Obol local + prod-aligned secret mode: credentials live in centaur-infra-env
+# (local: just bootstrap-secrets from shell; prod: GCP SM → ExternalSecret).
+# See contrib/scripts/bootstrap-k8s-secrets-env.sh and .env.obol-local.example.
+secretManager:
+  envPrefix: ""
+  existingSecretName: centaur-infra-env
+
+firewall:
+  existingCaSecretName: centaur-firewall-ca
+  existingCaKeySecretName: centaur-firewall-ca-key
+
+postgres:
+  auth:
+    existingSecretName: centaur-infra-env
+    existingSecretKey: POSTGRES_PASSWORD
+
+slackbot:
+  enabled: true
+  image:
+    pullPolicy: IfNotPresent
+
+api:
+  image:
+    pullPolicy: IfNotPresent
+  defaultHarness: claude-code
+  executionWorkerEnabled: true
+  pluginWatcherEnabled: true
+  egressDiscovery:
+    enabled: false
+
+ironProxy:
+  image:
+    pullPolicy: IfNotPresent
+  secretSource: env
+
+# OAuth refresh rotation needs a writable 1Password backend; disable for env mode.
+tokenBroker:
+  enabled: false
+
+sandbox:
+  image:
+    pullPolicy: IfNotPresent
+
+toolServer:
+  enabled: true
+
+# Obol overlay: personas + skills from ../obol-centaur-overlay (just build-obol-overlay).
+overlay:
+  image:
+    repository: obol-centaur-overlay
+    tag: latest
+    pullPolicy: IfNotPresent
+    sourcePath: /overlay
+
+# Pre-clone repos onto the kind node; sandboxes mount them read-only at
+# ~/github/{owner}/{repo}. Requires GITHUB_TOKEN in centaur-infra-env.
+repoCache:
+  enabled: true
+  repositories:
+    # Phase 0: Launchpad stack only (add data-pipelines / dbt / goteth when bot PAT has access)
+    - ObolNetwork/dv-launchpad
+    - ObolNetwork/obol-api
+    - ObolNetwork/obol-sdk
+    - ObolNetwork/obol-packages
+  githubToken:
+    existingSecretName: centaur-infra-env
+    secretKey: GITHUB_TOKEN

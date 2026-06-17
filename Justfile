@@ -4,7 +4,7 @@ namespace := env_var_or_default("CENTAUR_NAMESPACE", "centaur")
 release := env_var_or_default("CENTAUR_RELEASE", "centaur")
 source := env_var_or_default("CENTAUR_IMAGE_SOURCE", "local")
 chart := "contrib/chart"
-dev_values := "contrib/chart/values.dev.yaml"
+dev_values := env_var_or_default("CENTAUR_DEV_VALUES", "contrib/chart/values.obol-local.yaml")
 # Command used to import images into k3s's containerd. Override for rootless or
 # remote setups, e.g. CENTAUR_K3S_CTR="k3s ctr" or "ssh host sudo k3s ctr".
 k3s_ctr := env_var_or_default("CENTAUR_K3S_CTR", "sudo k3s ctr")
@@ -59,6 +59,10 @@ _build-slackbot:
 _build-agent:
     docker build --target sandbox -t centaur-agent:latest -f services/sandbox/Dockerfile .
 
+# Obol overlay image (../obol-centaur-overlay). Required when values.obol-local.yaml sets overlay.image.
+build-obol-overlay:
+    docker build -t obol-centaur-overlay:latest ../obol-centaur-overlay
+
 # Import locally-built images into k3s's containerd. k3s uses containerd, not
 # the Docker daemon, so `docker build` images are otherwise invisible to it
 # (pods ImagePullBackOff on the :latest tags). Used by `just up k3s`.
@@ -71,6 +75,10 @@ _import-k3s:
     done
 
 bootstrap-secrets *args:
+    contrib/scripts/bootstrap-k8s-secrets-env.sh --namespace {{namespace}} {{args}}
+
+# Upstream Paradigm bootstrap (1Password). Use: CENTAUR_DEV_VALUES=contrib/chart/values.dev.yaml just bootstrap-secrets-upstream
+bootstrap-secrets-upstream *args:
     contrib/scripts/bootstrap-k8s-secrets.sh --namespace {{namespace}} {{args}}
 
 deploy:
@@ -107,6 +115,16 @@ deploy:
       )
     fi
     helm upgrade --install {{release}} {{chart}} -n {{namespace}} --create-namespace -f {{dev_values}} ${extra_args[@]+"${extra_args[@]}"}
+
+# Load locally built images into a kind cluster (macOS / Docker Desktop path).
+kind-load cluster="centaur":
+    kind load docker-image \
+      centaur-api:latest \
+      centaur-slackbot:latest \
+      centaur-iron-proxy:latest \
+      centaur-agent:latest \
+      obol-centaur-overlay:latest \
+      --name {{cluster}}
 
 # Bring up the dev stack; pass `k3s` (just up k3s) to import local images into k3s's containerd.
 up import="":
@@ -186,7 +204,7 @@ cleanup-orphan-proxy-services mode="dry-run":
 shell component:
     kubectl exec -it -n {{namespace}} deploy/{{release}}-centaur-{{component}} -- sh
 
-smoke harness="codex":
+smoke harness=env_var_or_default("CENTAUR_SMOKE_HARNESS", "claude-code"):
     #!/usr/bin/env bash
     set -euo pipefail
     THREAD_KEY="smoke-$(date +%s)"
