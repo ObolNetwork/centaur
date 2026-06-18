@@ -40,11 +40,11 @@ settings:
   is_hosted: false
   token_rotation_enabled: false
   event_subscriptions:
-    request_url: https://ngrokurl/api/webhooks/slack
+    request_url: https://YOUR-NGROK-HOST/api/webhooks/slack
     bot_events:
       - app_mention
       - message.channels
       - message.groups
   interactivity:
     is_enabled: true
-    request_url: https://sleek-underwire-stylishly.ngrok-free.dev/api/slack/actions
+    request_url: https://YOUR-NGROK-HOST/api/slack/actions

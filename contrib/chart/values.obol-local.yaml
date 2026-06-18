@@ -57,7 +57,7 @@ overlay:
 repoCache:
   enabled: true
   repositories:
-    # Phase 0: Launchpad stack only (add data-pipelines / dbt / goteth when bot PAT has access)
+    # Phase 0: Launchpad stack (add data-pipelines / dbt / goteth when bot PAT has access)
     - ObolNetwork/dv-launchpad
     - ObolNetwork/obol-api
     - ObolNetwork/obol-sdk

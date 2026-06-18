@@ -1,0 +1,180 @@
+---
+title: Obol local setup (kind + Slack)
+description: Run Obol's Centaur fork locally on kind for Launchpad PR automation and Slack E2E testing.
+---
+
+# Obol local setup (kind + Slack)
+
+This guide is for **Obol team members** running the Centaur fork locally on a Mac
+(laptop or Mac Mini). It uses **kind**, env-mode secrets (no 1Password), the
+**obol-centaur-overlay** image, and a separate Slack app from `@obol-coworker`.
+
+Production GKE/ArgoCD deployment is out of scope here; see internal infra docs when
+that path is ready.
+
+## What you get
+
+- Centaur API + Slackbot + sandboxes on a local Kubernetes cluster
+- Claude Code harness (default) with Obol personas/skills from the overlay
+- Pre-cloned Launchpad repos in sandboxes (`dv-launchpad`, `obol-api`, `obol-sdk`, `obol-packages`)
+- PRs opened via **`repository_dispatch`** → verified commits on `dv-launchpad` (no direct unsigned push)
+
+## Prerequisites
+
+Clone both repos as siblings (paths matter for `just build-obol-overlay`):
+
+```text
+~/work/
+  centaur/                 # Obol fork (this repo)
+  obol-centaur-overlay/    # Personas, skills, dispatch script
+```
+
+Install tools:
+
+```bash
+brew install just kubectl helm jq kind docker ngrok
+```
+
+- **Docker Desktop** running
+- **Slack app** — create from [`docs/slack-app-manifest.yaml`](https://github.com/ObolNetwork/centaur/blob/main/docs/slack-app-manifest.yaml) (separate from obol-coworker)
+- **GitHub bot PAT** — fine-grained or classic with **Contents** + **Pull requests** write on target repos; **no Actions** scope (workflow runs on GitHub-hosted runners)
+- **Anthropic API key** — Claude Code is the default harness
+
+## 1. Kubernetes context (critical)
+
+Always target the **local kind** cluster, not GKE:
+
+```bash
+kind create cluster --name centaur   # once
+kubectl config use-context kind-centaur
+kubectl config current-context       # must show kind-centaur
+```
+
+If you accidentally deployed to GKE, switch context back before any `just deploy`.
+
+## 2. Environment file
+
+```bash
+cd centaur
+cp .env.obol-local.example .env
+# Edit .env — never commit this file
+```
+
+| Variable | Purpose |
+| --- | --- |
+| `SLACK_BOT_TOKEN` | From Slack app OAuth (Bot User) |
+| `SLACK_SIGNING_SECRET` | From Slack app Basic Information |
+| `SLACKBOT_API_KEY` | Shared secret API ↔ Slackbot (`openssl rand -hex 32`) |
+| `ANTHROPIC_API_KEY` | Claude Code harness |
+| `GITHUB_TOKEN` | Repo cache clone + `repository_dispatch` in sandboxes |
+
+`just` loads `.env` automatically (`set dotenv-load := true` in the Justfile).
+
+## 3. Build and load images
+
+From the `centaur` repo root:
+
+```bash
+just build
+just build-obol-overlay    # builds ../obol-centaur-overlay → obol-centaur-overlay:latest
+just kind-load             # loads all images into kind
+```
+
+Obol defaults use `contrib/chart/values.obol-local.yaml` (env secrets, overlay, repo cache, `defaultHarness: claude-code`).
+
+## 4. Bootstrap secrets and deploy
+
+```bash
+just bootstrap-secrets
+just deploy
+just status               # pods should become Ready
+just smoke                # spawns sandbox, expects PONG
+```
+
+**Postgres password:** if you re-run `just bootstrap-secrets --force`, run `just down` first, then bootstrap and deploy again. Forcing secret rotation without a fresh namespace leaves Postgres on the old password.
+
+## 5. Slack webhook (laptop testing)
+
+Centaur Slackbot listens on **`/api/webhooks/slack`** (not `/slack/events`).
+
+Terminal A — port-forward:
+
+```bash
+kubectl port-forward -n centaur svc/centaur-centaur-slackbot 3001:3001
+```
+
+Terminal B — tunnel:
+
+```bash
+ngrok http 3001
+```
+
+In the Slack app settings, set **Event Subscriptions** and **Interactivity** request URLs to:
+
+```text
+https://YOUR-NGROK-HOST/api/webhooks/slack
+https://YOUR-NGROK-HOST/api/slack/actions
+```
+
+Install the app to the workspace, invite `@obol-centaur` to a test channel, and `@mention` it with a small Launchpad task.
+
+## 6. PR flow (repository_dispatch)
+
+Sandboxes edit code under `~/branches/ObolNetwork/dv-launchpad`. Opening a PR does **not** use `git push` or unsigned `gh pr create` from the bot.
+
+Instead the overlay script posts `repository_dispatch` to GitHub:
+
+```text
+/home/agent/overlay/org/scripts/centaur-dispatch-pr.sh
+```
+
+That triggers `.github/workflows/centaur-open-pr.yml` on `dv-launchpad`, which creates a **signed** commit and PR via `peter-evans/create-pull-request`.
+
+Requires:
+
+- `GITHUB_TOKEN` in `centaur-infra-env`
+- Workflow merged on `dv-launchpad` `main`
+- Overlay image deployed (`just build-obol-overlay && just kind-load && just deploy`)
+
+## 7. Optional: sandbox dispatch smoke (Step 4)
+
+Without Slack, verify dispatch from inside a sandbox:
+
+```bash
+chmod +x contrib/scripts/local-dispatch-sandbox-smoke.sh
+contrib/scripts/local-dispatch-sandbox-smoke.sh              # dry-run
+contrib/scripts/local-dispatch-sandbox-smoke.sh --dispatch     # real dispatch
+```
+
+## Troubleshooting
+
+| Symptom | Fix |
+| --- | --- |
+| `ImagePullBackOff` | Run `just kind-load` after every local rebuild |
+| API pod `CrashLoopBackOff` after `--force` bootstrap | `just down`, then bootstrap + deploy |
+| Slack 403 / URL verification fails | Check signing secret; ngrok URL must match manifest |
+| Sandbox missing repo | Confirm repo in `values.obol-local.yaml` `repoCache.repositories`; wait for repo-cache pod Ready |
+| Missing overlay script | Rebuild overlay image and redeploy |
+| PR workflow fails unsigned commit | Ensure dispatch workflow uses create-pull-request with `sign-commits: true` |
+| Wrong cluster | `kubectl config use-context kind-centaur` |
+
+## Useful commands
+
+```bash
+just logs api
+just logs slackbot
+just down                    # delete centaur namespace
+just reinstall               # down + up (fresh namespace)
+kubectl get pods -n centaur
+```
+
+## Related files
+
+| Path | Role |
+| --- | --- |
+| `contrib/chart/values.obol-local.yaml` | Obol Helm overrides |
+| `.env.obol-local.example` | Template for local secrets |
+| `contrib/scripts/bootstrap-k8s-secrets-env.sh` | Creates `centaur-infra-env` |
+| `docs/slack-app-manifest.yaml` | Slack app template |
+| `contrib/scripts/local-dispatch-sandbox-smoke.sh` | Dispatch E2E without Slack |
+| `../obol-centaur-overlay/` | Personas, skills, `centaur-dispatch-pr.sh` |
