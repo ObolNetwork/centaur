@@ -27,8 +27,11 @@ print('\n'.join(sorted(deps)))
     _extra_deps+=$'\n'
   done
   if [[ -n "${_extra_deps}" ]]; then
-    echo "$_extra_deps" | sort -u | grep -v '^$' > /tmp/_extra_deps.txt
-    uv pip install -r /tmp/_extra_deps.txt --quiet 2>/dev/null || true
+    # grep exits 1 when overlay tool dirs have no dependencies — don't abort startup.
+    echo "$_extra_deps" | sort -u | grep -v '^$' > /tmp/_extra_deps.txt || true
+    if [[ -s /tmp/_extra_deps.txt ]]; then
+      uv pip install -r /tmp/_extra_deps.txt --quiet 2>/dev/null || true
+    fi
     rm -f /tmp/_extra_deps.txt
   fi
 fi
