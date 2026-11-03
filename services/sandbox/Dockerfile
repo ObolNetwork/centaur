@@ -160,7 +160,7 @@ RUN if [ "$(dpkg --print-architecture)" = "amd64" ]; then \
 
 # ── Agent skills + workspace setup (rarely changes) ─────────────────────────
 RUN --mount=type=cache,target=/home/agent/.npm,uid=1001,gid=1001,sharing=locked \
-    npx -y skills add vercel-labs/agent-browser
+    npx -y skills@1.5.12 add vercel-labs/agent-browser
 RUN mkdir -p ~/.amp/bin ~/.config/amp ~/.codex ~/.pi/agent ~/github ~/workspace \
     && git config --global init.defaultBranch main \
     && git config --global push.autoSetupRemote true \

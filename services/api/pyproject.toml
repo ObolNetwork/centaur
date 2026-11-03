@@ -37,7 +37,7 @@ dev-dependencies = [
     "asgi-lifespan>=2.1.0",
     "pytest>=9.0.2",
     "pytest-asyncio>=0.25.0",
-    "ruff>=0.15.5",
+    "ruff>=0.15.5,<0.16",  # 0.16 adds rules the fork has not adopted
 ]
 
 [tool.uv.sources]
